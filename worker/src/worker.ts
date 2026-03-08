@@ -37,12 +37,26 @@ app.onError((err, c) => {
 app.use('/*', async (c, next) => {
 
 	// check if the request is for static files
-	if (c.env.ASSETS && !API_PATHS.some(path => c.req.path.startsWith(path))) {
-		const url = new URL(c.req.raw.url);
-		if (!url.pathname.includes('.')) {
-			url.pathname = ""
+	// NOTE: when using Worker Assets (USE_WORKER_ASSETS=true), the admin panel UI is served by ASSETS,
+	// but the admin API lives under /admin/*. Without this special-case, visiting /admin would be treated
+	// as an API request and return 401.
+	if (c.env.ASSETS) {
+		const reqUrl = new URL(c.req.raw.url);
+		const reqPath = reqUrl.pathname;
+		const accept = c.req.raw.headers.get('accept') || '';
+
+		// Serve SPA routes (HTML navigation) via assets even if they overlap with API prefixes
+		const isHtmlNav = accept.includes('text/html');
+		const shouldServeAdminUi = (reqPath === '/admin' || reqPath.startsWith('/admin/')) && isHtmlNav;
+
+		if (shouldServeAdminUi || !API_PATHS.some(path => reqPath.startsWith(path))) {
+			const url = new URL(reqUrl);
+			// For SPA routes, rewrite to root (index.html) unless it's a real static file request.
+			if (!url.pathname.includes('.')) {
+				url.pathname = "";
+			}
+			return c.env.ASSETS.fetch(url);
 		}
-		return c.env.ASSETS.fetch(url);
 	}
 
 	// save language in context
